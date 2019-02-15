@@ -35,10 +35,12 @@ print(df)
 
 
 def cleanPunc(sentence): #function to clean the word of any punctuation or special characters
+    
     cleaned = re.sub(r'[?|!|\'|"|#]',r'',sentence)
     cleaned = re.sub(r'[.|,|)|(|\|/]',r' ',cleaned)
     cleaned = cleaned.strip()
     cleaned = cleaned.replace("\n"," ")
+    cleaned = cleaned.lower()
     return cleaned
    
 filter_genre = df[df["Genre_count"] > 10]   
@@ -49,6 +51,13 @@ genre_transposed = filter_genre.transpose()
 genre_list = list(filter_genre["Genre"])
 print(len(genre_list))
 
+clean_genre_list = []
+
+for genre in genre_list:
+    clean_genre_list.append(cleanPunc(genre))
+    
+print(len(clean_genre_list))    
+print(clean_genre_list)   
 
 
 column_list = ["Wiki ID", "Name", "Summary"]
@@ -91,6 +100,10 @@ print(df1.head())
 print(df1.shape)
 
 
+###################################################################################################################################
+###############################################################  MODEL DEVELOPMENT ##################################################
+############################################################################################################################
+
 import re
 import matplotlib
 import matplotlib.pyplot as plt
@@ -98,8 +111,8 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.naive_bayes import ComplementNB
-from sklearn.naive_bayes import ComplementNB
+#from sklearn.naive_bayes import ComplementNB
+#from sklearn.naive_bayes import ComplementNB
 
 
 from sklearn.metrics import accuracy_score
@@ -115,9 +128,10 @@ import seaborn as sns
 
 
 
-df1['Summary'] = df1['Summary'].map(lambda summ : clean_text(summ))
+#df1['Summary'] = df1['Summary'].map(lambda summ : clean_text(summ))
 
 
+##########################Train Test split transformation Output Input separation####################################################
 
 df1['Summary'] = df1['Summary'].apply(cleanPunc)
 
@@ -125,7 +139,7 @@ df1['Summary'] = df1['Summary'].apply(cleanPunc)
 print(df1.head())
 
 df1 = df1.infer_objects()
-
+ 
 train, test = train_test_split(df1, random_state=42, test_size=0.33, shuffle=True)
 X_train = train.Summary
 X_test = test.Summary
@@ -135,10 +149,61 @@ print(X_test.shape)
 Y_train = train.drop(labels = ['Wiki ID','Name','Summary'], axis =1)
 Y_test = test.drop(labels = ['Wiki ID','Name','Summary'], axis =1)
 
+
+
+######################################################################################################################################
+
+
+####################################### Label Powerset Transformation #################################################
+from skmultilearn.problem_transform import LabelPowerset
+
+Y_LP_train = LabelPowerset().transform(Y_train)
+#print(Y_LP_train)
+Y_LP_test = LabelPowerset().transform(Y_test)
+
+######################################################################################################################
+
+
+
+
+###################### TFIDF Vectorizer##################################################################
+vectorizer = TfidfVectorizer(stop_words=stop_words)
+vectorizer.fit(X_train)
+vectorizer.fit(X_test)
+x_train_vect = vectorizer.transform(X_train)
+x_test_vect = vectorizer.transform(X_test)
+##########################################################################################################
+
+
+multiclassifier = MultinomialNB()
+multiclassifier.fit(x_train_vect,Y_LP_train)
+multiclass_predict = multiclassifier.predict(x_test_vect)
+print(Y_LP_test)
+print(multiclass_predict)
+print('Test accuracy {}'.format(accuracy_score(Y_LP_test,multiclass_predict)))
+##############################Label Powerset classifier####################### 
+from skmultilearn.problem_transform import LabelPowerset
+from sklearn.naive_bayes import GaussianNB
+
+LP_classifier = LabelPowerset(GaussianNB())
+
+LP_classifier.fit(x_train_vect, Y_train)
+
+LP_predictions = LP_classifier.predict(x_test_vect)
+
+print('Test accuracy {}'.format(accuracy_score(Y_test,LP_prediction)))
+
+
+
+#########################################################################################################
+
+
+
+
+############################ using Naive Bayes pipeline###################################################
 NB_pipeline = Pipeline([
                 ('tfidf', TfidfVectorizer(stop_words=stop_words)),
-                ('clf', ComplementNB(
-                    fit_prior=True, class_prior=None)),
+                ('clf', OneVsRestClassifier(LinearSVC(), n_jobs=1)),
             ])
 prediction = pd.DataFrame().reindex_like(Y_test)                
 for genre_category in clean_genre_list:
@@ -152,9 +217,67 @@ for genre_category in clean_genre_list:
 
 print('Test accuracy {}'.format(accuracy_score(Y_test,prediction)))
 
+########################################################################################################
+
+########################## using Label Powerset pipeline ########################################
+from skmultilearn.problem_transform import LabelPowerset
+from sklearn.naive_bayes import GaussianNB
+
+# initialize Label Powerset multi-label classifier
+# with a gaussian naive bayes base classifier
+LP_pipeline = Pipeline([
+                ('tfidf', TfidfVectorizer(stop_words=stop_words)),
+                ('lpclf',LabelPowerset(GaussianNB())),])
+
+
+# train
+LP_pipeline.fit(X_train, Y_train)
+
+# predict
+predictions = LP_pipeline.predict(X_test)
+
     
+print('Test accuracy {}'.format(accuracy_score(Y_test,predictions)))
+######################################################################################################
+print(Y_test)
+
+print(prediction)
+
+
+#print( list(prediction["science fiction"]))
+
+##################Evaluation Metrics####################################################################
+
+def perf_measure(y_actual, y_hat):
+    TP = 0
+    FP = 0
+    TN = 0
+    FN = 0
+
+    for i in range(len(y_hat)): 
+        if y_actual[i]==y_hat[i]==1:
+           TP += 1
+        if y_hat[i]==1 and y_actual[i]!=y_hat[i]:
+           FP += 1
+        if y_actual[i]==y_hat[i]==0:
+           TN += 1
+        if y_hat[i]==0 and y_actual[i]!=y_hat[i]:
+           FN += 1
+
+return(TP, FP, TN, FN)
+
+TPC = []
+FPC = []
+TNC = []
+FNC = []
+    
+for genre_category in clean_genre_list:
+     
+#######################################################################################################    
 """    
     
+
+
     
 from skmultilearn.problem_transform import BinaryRelevance
 
@@ -165,4 +288,6 @@ BR_pipeline = Pipeline([
             ])
 BR_pipeline.fit(X_train, Y_train)
 predictions = BR_pipeline.predict(X_test)    
-print("Accuracy = ",accuracy_score(Y_test,predictions))
+print("Accuracy = ",accura cy_score(Y_test,predictions))
+
+" " " 
